@@ -1,0 +1,1162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLVM Dead Code Elimination Optimizer</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --border: #cbd5e1;
+      --text: #0f172a;
+      --muted: #475569;
+      --primary: #1d4ed8;
+      --primary-hover: #1e40af;
+      --primary-light: #eff6ff;
+      --accent: #0284c7;
+      --danger-bg: #fef2f2;
+      --danger-border: #f87171;
+      --danger-text: #991b1b;
+      --removed-bg: #fee2e2;
+      --removed-text: #991b1b;
+      --card-bg: #ffffff;
+      --mono-font: "Consolas", "Monaco", "Courier New", monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.5;
+      padding: 24px;
+    }
+
+    .container {
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    /* 1. Header */
+    header {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    header h1 {
+      font-size: 26px;
+      color: var(--primary);
+      margin-bottom: 6px;
+    }
+
+    header p.subtitle {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--muted);
+    }
+
+    .badge-status {
+      display: inline-block;
+      margin-top: 10px;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .badge-ok { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+    .badge-warn { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+
+    /* 2. Workflow Strip */
+    .workflow-strip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .step-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 14px;
+      font-size: 13px;
+      transition: all 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .step-card .step-title {
+      font-weight: 700;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .step-card.active {
+      border-color: var(--primary);
+      background: var(--primary-light);
+    }
+
+    .step-card.active .step-title {
+      color: var(--primary);
+    }
+
+    .step-card.done {
+      border-color: #10b981;
+      background: #ecfdf5;
+    }
+
+    .step-card.done .step-title {
+      color: #047857;
+    }
+
+    /* 3. Input Section */
+    .input-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .input-type-toggle {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      align-items: center;
+      padding: 8px 12px;
+      background: #f1f5f9;
+      border-radius: 6px;
+      margin-bottom: 14px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .input-type-toggle label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+
+    .input-mode-tag {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: #e0f2fe;
+      color: #0369a1;
+      margin-left: auto;
+    }
+
+    .input-controls {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .example-select-wrapper {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
+    select, button {
+      font-family: inherit;
+      font-size: 14px;
+      padding: 8px 14px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: white;
+      cursor: pointer;
+    }
+
+    button.btn-secondary {
+      background: #f8fafc;
+      color: var(--muted);
+      border-color: var(--border);
+      font-size: 13px;
+      padding: 7px 12px;
+    }
+
+    button.btn-secondary:hover {
+      background: #e2e8f0;
+      color: var(--text);
+    }
+
+    select {
+      max-width: 420px;
+    }
+
+    button.btn-primary {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+      font-weight: 600;
+    }
+
+    button.btn-primary:hover {
+      background: var(--primary-hover);
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .example-description {
+      font-size: 13px;
+      color: var(--accent);
+      margin-bottom: 10px;
+      font-style: italic;
+    }
+
+    textarea#c-code-input {
+      width: 100%;
+      height: 200px;
+      font-family: var(--mono-font);
+      font-size: 13px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fafafa;
+      color: #1e293b;
+      resize: vertical;
+    }
+
+    /* Error Box */
+    .error-box {
+      background: var(--danger-bg);
+      border: 1px solid var(--danger-border);
+      color: var(--danger-text);
+      padding: 14px 18px;
+      border-radius: 6px;
+      margin-bottom: 20px;
+      display: none;
+    }
+
+    .error-box h4 {
+      margin-bottom: 4px;
+      font-size: 15px;
+    }
+
+    .error-box details {
+      margin-top: 8px;
+      font-family: var(--mono-font);
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+
+    /* 4. Stats Cards */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+    }
+
+    .stat-card .stat-value {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--primary);
+      margin-top: 4px;
+    }
+
+    .stat-card .stat-label {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--muted);
+    }
+
+    /* 5. Phase Tabs */
+    .phases-container {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .tab-nav {
+      display: flex;
+      flex-wrap: wrap;
+      border-bottom: 2px solid var(--border);
+      gap: 4px;
+      margin-bottom: 16px;
+    }
+
+    .tab-btn {
+      border: none;
+      border-bottom: 3px solid transparent;
+      background: none;
+      padding: 10px 14px;
+      font-weight: 600;
+      color: var(--muted);
+      cursor: pointer;
+      border-radius: 0;
+      text-align: left;
+    }
+
+    .tab-btn.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+      background: var(--primary-light);
+    }
+
+    .phase-caption {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 12px;
+      font-style: italic;
+    }
+
+    .phase-panel {
+      display: none;
+    }
+
+    .phase-panel.active {
+      display: block;
+    }
+
+    .code-viewer {
+      background: #fafafa;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      font-family: var(--mono-font);
+      font-size: 12px;
+      line-height: 1.45;
+      max-height: 400px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    /* 6. Side by Side IR Viewer */
+    .ir-comparison-container {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .ir-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 12px;
+    }
+
+    @media (max-width: 900px) {
+      .ir-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .ir-panel {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #ffffff;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .ir-panel-header {
+      background: #f1f5f9;
+      border-bottom: 1px solid var(--border);
+      padding: 8px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 600;
+      font-size: 13px;
+    }
+
+    .ir-panel-body {
+      padding: 10px;
+      font-family: var(--mono-font);
+      font-size: 12px;
+      line-height: 1.4;
+      max-height: 480px;
+      overflow-y: auto;
+    }
+
+    .ir-line {
+      display: flex;
+      white-space: pre;
+    }
+
+    .ir-line-num {
+      width: 44px;
+      flex-shrink: 0;
+      color: #94a3b8;
+      user-select: none;
+      text-align: right;
+      padding-right: 12px;
+    }
+
+    .ir-line-text {
+      flex-grow: 1;
+    }
+
+    .ir-line.removed {
+      background-color: var(--removed-bg);
+      color: var(--removed-text);
+      text-decoration: line-through;
+      font-weight: 600;
+    }
+
+    /* 7 & 8. Tables */
+    .tables-section {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    @media (max-width: 900px) {
+      .tables-section {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .table-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+    }
+
+    .table-card h3 {
+      font-size: 16px;
+      color: var(--text);
+      margin-bottom: 12px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th, td {
+      border: 1px solid var(--border);
+      padding: 8px 10px;
+      text-align: left;
+    }
+
+    th {
+      background: #f1f5f9;
+      font-weight: 600;
+    }
+
+    td.code-cell {
+      font-family: var(--mono-font);
+      font-size: 12px;
+    }
+
+    /* 9. Actions & Footer */
+    .actions-bar {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      margin-bottom: 30px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <!-- 1. Header -->
+  <header>
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px;">
+      <div>
+        <h1>LLVM Dead Code Elimination Optimizer</h1>
+        <p class="subtitle">C code &rarr; LLVM IR &rarr; Dead Code Elimination &rarr; Optimized IR (Review-2 Working Model)</p>
+        <div id="status-badge" class="badge-status badge-warn">Checking Clang status...</div>
+      </div>
+      <div style="font-size: 13px; color: var(--muted); text-align: right; background: #f8fafc; border: 1px solid var(--border); padding: 8px 12px; border-radius: 6px;">
+        <strong>Team Details:</strong><br>
+        Abhishek Padhy &bull; 24BCB0116<br>
+        Arpit Bhardwaj &bull; 24BCI0036<br>
+        Kushagra Kumar &bull; 24BKT0019
+      </div>
+    </div>
+  </header>
+
+  <!-- 2. Workflow Strip (Review-1 Slide steps) -->
+  <div class="workflow-strip">
+    <div class="step-card" id="step-1">
+      <div class="step-title"><span>1</span> Compile C to IR</div>
+      <div class="step-desc">Clang emits unoptimized LLVM IR (-O0).</div>
+    </div>
+    <div class="step-card" id="step-2">
+      <div class="step-title"><span>2</span> Traverse Basic Blocks</div>
+      <div class="step-desc">Parse functions and block instructions.</div>
+    </div>
+    <div class="step-card" id="step-3">
+      <div class="step-title"><span>3</span> Build Def-Use Counts</div>
+      <div class="step-desc">Count operand uses for each SSA value.</div>
+    </div>
+    <div class="step-card" id="step-4">
+      <div class="step-title"><span>4</span> Safe DCE Erasure</div>
+      <div class="step-desc">Erase 0-use instructions and write-only allocas.</div>
+    </div>
+    <div class="step-card" id="step-5">
+      <div class="step-title"><span>5</span> Output Optimized IR</div>
+      <div class="step-desc">Verify fixed-point and inspect target assembly.</div>
+    </div>
+  </div>
+
+  <!-- Error Box -->
+  <div id="error-box" class="error-box">
+    <h4 id="error-title">Error</h4>
+    <p id="error-msg"></p>
+    <details id="error-details-wrapper">
+      <summary>View Clang Diagnostic Details</summary>
+      <div id="error-details"></div>
+    </details>
+  </div>
+
+  <!-- 3. Input Section -->
+  <div class="input-section">
+    <div class="input-type-toggle">
+      <span><strong>Input Format:</strong></span>
+      <label>
+        <input type="radio" name="input-mode" value="c" checked>
+        C Source Code (via Clang)
+      </label>
+      <label>
+        <input type="radio" name="input-mode" value="ir">
+        Direct LLVM IR (.ll)
+      </label>
+      <span id="input-mode-badge" class="input-mode-tag">C Source Mode</span>
+    </div>
+
+    <div class="input-controls">
+      <div class="example-select-wrapper">
+        <label for="example-select"><strong>Preset Examples:</strong></label>
+        <select id="example-select">
+          <option value="custom">✏️ Custom Input (Write or paste code below)</option>
+        </select>
+        <button id="btn-clear" type="button" class="btn-secondary" title="Clear editor to type custom code">Clear Editor</button>
+        <button id="btn-template" type="button" class="btn-secondary" title="Insert starter code template">Insert Starter Template</button>
+      </div>
+      <div>
+        <button id="btn-optimize" class="btn-primary">Optimize Input</button>
+      </div>
+    </div>
+    <div id="example-desc" class="example-description">You can freely type or paste custom code below, or choose a preset example above.</div>
+    <textarea id="c-code-input" spellcheck="false" placeholder="Write or paste your custom C code here..."></textarea>
+  </div>
+
+  <!-- 4. Stats Cards -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">Instructions Before</div>
+      <div id="stat-before" class="stat-value">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Instructions After</div>
+      <div id="stat-after" class="stat-value">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Dead Removed</div>
+      <div id="stat-removed" class="stat-value">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Reduction %</div>
+      <div id="stat-percent" class="stat-value">0.0%</div>
+    </div>
+  </div>
+
+  <!-- 5. Compiler Phases Tabs -->
+  <div class="phases-container">
+    <h3 style="margin-bottom: 12px;">Compiler Phases Viewer</h3>
+    <div class="tab-nav">
+      <button class="tab-btn active" data-tab="tab-tokens">Tokens (Lexical Analysis)</button>
+      <button class="tab-btn" data-tab="tab-ast">AST (Syntax Analysis)</button>
+      <button class="tab-btn" data-tab="tab-ir-before">LLVM IR Before (Intermediate Code)</button>
+      <button class="tab-btn" data-tab="tab-ir-after">LLVM IR After (Code Optimization)</button>
+      <button class="tab-btn" data-tab="tab-assembly">Assembly (Target Code)</button>
+    </div>
+    <div style="font-size: 12px; color: #64748b; margin-bottom: 10px;">
+      * Note: Semantic analysis is performed by Clang frontend; any semantic errors are reported directly in the diagnostic panel.
+    </div>
+
+    <div id="tab-tokens" class="phase-panel active">
+      <div class="phase-caption">Phase 1: Lexical tokens emitted by Clang (-dump-tokens).</div>
+      <div id="content-tokens" class="code-viewer">Click "Optimize Code" to view lexical tokens.</div>
+    </div>
+    <div id="tab-ast" class="phase-panel">
+      <div class="phase-caption">Phase 2: Abstract Syntax Tree emitted by Clang (-ast-dump).</div>
+      <div id="content-ast" class="code-viewer">Click "Optimize Code" to view AST.</div>
+    </div>
+    <div id="tab-ir-before" class="phase-panel">
+      <div class="phase-caption">Phase 3: Unoptimized LLVM IR (-S -emit-llvm -O0).</div>
+      <div id="content-ir-before" class="code-viewer">Click "Optimize Code" to view unoptimized IR.</div>
+    </div>
+    <div id="tab-ir-after" class="phase-panel">
+      <div class="phase-caption">Phase 4: Dead Code Eliminated IR text from our custom pass.</div>
+      <div id="content-ir-after" class="code-viewer">Click "Optimize Code" to view optimized IR.</div>
+    </div>
+    <div id="tab-assembly" class="phase-panel">
+      <div class="phase-caption">Phase 5: Target machine assembly code generated from optimized IR.</div>
+      <div id="content-assembly" class="code-viewer">Click "Optimize Code" to view target assembly.</div>
+    </div>
+  </div>
+
+  <!-- 6. Side by Side IR Comparison -->
+  <div class="ir-comparison-container">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+      <h3>Side-by-Side IR Verification</h3>
+      <button id="btn-download-ll">Download Optimized .ll</button>
+    </div>
+    <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">
+      Instructions safely removed by our pass are highlighted in light red with strikethrough in the Before panel.
+    </p>
+    <div class="ir-grid">
+      <div class="ir-panel">
+        <div class="ir-panel-header">
+          <span>LLVM IR Before DCE (Unoptimized)</span>
+          <button id="btn-copy-before">Copy</button>
+        </div>
+        <div id="ir-before-lines" class="ir-panel-body">No IR loaded.</div>
+      </div>
+      <div class="ir-panel">
+        <div class="ir-panel-header">
+          <span>LLVM IR After DCE (Optimized)</span>
+          <button id="btn-copy-after">Copy</button>
+        </div>
+        <div id="ir-after-lines" class="ir-panel-body">No IR loaded.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7 & 8. Removed Instructions & Cascade Rounds Tables -->
+  <div class="tables-section">
+    <div class="table-card">
+      <h3>What Was Removed and Why</h3>
+      <div style="overflow-x: auto;">
+        <table id="removed-table">
+          <thead>
+            <tr>
+              <th>Function</th>
+              <th>Block</th>
+              <th>Line</th>
+              <th>Instruction</th>
+              <th>Reason</th>
+              <th>Round</th>
+            </tr>
+          </thead>
+          <tbody id="removed-tbody">
+            <tr>
+              <td colspan="6" style="text-align: center; color: var(--muted);">No optimization has been run yet.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="table-card">
+      <h3>Convergence Rounds</h3>
+      <div style="overflow-x: auto;">
+        <table id="rounds-table">
+          <thead>
+            <tr>
+              <th>Round</th>
+              <th>Instructions Removed</th>
+            </tr>
+          </thead>
+          <tbody id="rounds-tbody">
+            <tr>
+              <td colspan="2" style="text-align: center; color: var(--muted);">-</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // Global state
+  let currentExamples = [];
+  let currentBeforeIR = "";
+  let currentAfterIR = "";
+
+  // DOM Elements
+  const statusBadge = document.getElementById("status-badge");
+  const exampleSelect = document.getElementById("example-select");
+  const exampleDesc = document.getElementById("example-desc");
+  const cCodeInput = document.getElementById("c-code-input");
+  const btnOptimize = document.getElementById("btn-optimize");
+  const btnClear = document.getElementById("btn-clear");
+  const btnTemplate = document.getElementById("btn-template");
+  const inputModeBadge = document.getElementById("input-mode-badge");
+  const inputModeRadios = document.querySelectorAll('input[name="input-mode"]');
+  const errorBox = document.getElementById("error-box");
+  const errorTitle = document.getElementById("error-title");
+  const errorMsg = document.getElementById("error-msg");
+  const errorDetails = document.getElementById("error-details");
+  const errorDetailsWrapper = document.getElementById("error-details-wrapper");
+
+  // Stats Elements
+  const statBefore = document.getElementById("stat-before");
+  const statAfter = document.getElementById("stat-after");
+  const statRemoved = document.getElementById("stat-removed");
+  const statPercent = document.getElementById("stat-percent");
+
+  // IR Elements
+  const irBeforeLines = document.getElementById("ir-before-lines");
+  const irAfterLines = document.getElementById("ir-after-lines");
+  const btnCopyBefore = document.getElementById("btn-copy-before");
+  const btnCopyAfter = document.getElementById("btn-copy-after");
+  const btnDownloadLL = document.getElementById("btn-download-ll");
+
+  // Tables
+  const removedTbody = document.getElementById("removed-tbody");
+  const roundsTbody = document.getElementById("rounds-tbody");
+
+  // Phase Tabs
+  const tabButtons = document.querySelectorAll(".tab-btn");
+  const phasePanels = document.querySelectorAll(".phase-panel");
+  const contentTokens = document.getElementById("content-tokens");
+  const contentAst = document.getElementById("content-ast");
+  const contentIrBefore = document.getElementById("content-ir-before");
+  const contentIrAfter = document.getElementById("content-ir-after");
+  const contentAssembly = document.getElementById("content-assembly");
+
+  // Workflow steps
+  const steps = [
+    document.getElementById("step-1"),
+    document.getElementById("step-2"),
+    document.getElementById("step-3"),
+    document.getElementById("step-4"),
+    document.getElementById("step-5")
+  ];
+
+  function setWorkflowStep(activeIdx) {
+    steps.forEach((step, idx) => {
+      step.classList.remove("active", "done");
+      if (idx < activeIdx) {
+        step.classList.add("done");
+      } else if (idx === activeIdx) {
+        step.classList.add("active");
+      }
+    });
+  }
+
+  function showError(title, msg, details) {
+    errorBox.style.display = "block";
+    errorTitle.textContent = title;
+    errorMsg.textContent = msg;
+    if (details && details.trim().length > 0) {
+      errorDetails.textContent = details;
+      errorDetailsWrapper.style.display = "block";
+    } else {
+      errorDetailsWrapper.style.display = "none";
+    }
+  }
+
+  function hideError() {
+    errorBox.style.display = "none";
+    errorTitle.textContent = "";
+    errorMsg.textContent = "";
+    errorDetails.textContent = "";
+  }
+
+  // Check Clang status
+  async function checkStatus() {
+    try {
+      const res = await fetch("/api/status");
+      const data = await res.json();
+      if (data.clang_available) {
+        statusBadge.className = "badge-status badge-ok";
+        statusBadge.textContent = "Clang Detected: " + data.clang_version;
+      } else {
+        statusBadge.className = "badge-status badge-warn";
+        statusBadge.textContent = "Clang Not Found: " + data.clang_version;
+      }
+    } catch (e) {
+      statusBadge.className = "badge-status badge-warn";
+      statusBadge.textContent = "Unable to connect to backend server";
+    }
+  }
+
+  // Load examples
+  async function loadExamples() {
+    try {
+      const res = await fetch("/api/examples");
+      const list = await res.json();
+      currentExamples = list;
+      exampleSelect.innerHTML = '<option value="custom">✏️ Custom Code (Type or paste in editor below)</option>';
+      list.forEach((item, idx) => {
+        const opt = document.createElement("option");
+        opt.value = idx;
+        opt.textContent = item.name;
+        exampleSelect.appendChild(opt);
+      });
+      // Preload first example
+      if (list.length > 0) {
+        exampleSelect.value = "0";
+        selectExample(0);
+      }
+    } catch (e) {
+      console.error("Failed to load examples", e);
+    }
+  }
+
+  function selectExample(index) {
+    if (index >= 0 && index < currentExamples.length) {
+      const eg = currentExamples[index];
+      cCodeInput.value = eg.code;
+      exampleDesc.textContent = "Observation goal: " + eg.description;
+      inputModeBadge.textContent = "Example: " + eg.name.split(".")[1].trim().split("(")[0];
+    }
+  }
+
+  exampleSelect.addEventListener("change", (e) => {
+    const val = e.target.value;
+    if (val === "custom") {
+      exampleDesc.textContent = "Writing custom code. Click 'Optimize Input' when ready.";
+      inputModeBadge.textContent = "✏️ Custom Input";
+    } else if (val !== "") {
+      selectExample(parseInt(val, 10));
+    } else {
+      exampleDesc.textContent = "";
+    }
+  });
+
+  // When user types or pastes into the textarea, auto-switch dropdown to custom
+  cCodeInput.addEventListener("input", () => {
+    exampleSelect.value = "custom";
+    exampleDesc.textContent = "Editing custom input code. Click 'Optimize Input' to run the DCE optimizer.";
+    inputModeBadge.textContent = "✏️ Custom Input";
+  });
+
+  // Clear Editor button
+  btnClear.addEventListener("click", () => {
+    cCodeInput.value = "";
+    exampleSelect.value = "custom";
+    exampleDesc.textContent = "Editor cleared. Type or paste your own code below.";
+    inputModeBadge.textContent = "Empty (Ready for Input)";
+    cCodeInput.focus();
+  });
+
+  // Insert Starter Template button
+  btnTemplate.addEventListener("click", () => {
+    const mode = document.querySelector('input[name="input-mode"]:checked').value;
+    exampleSelect.value = "custom";
+    if (mode === "ir") {
+      cCodeInput.value = `; Custom unoptimized LLVM IR module\ndefine i32 @custom_test(i32 %x, i32 %y) {\nentry:\n  ; Dead instructions (never used in return)\n  %dead1 = mul i32 %x, 10\n  %dead2 = add i32 %dead1, 5\n  \n  ; Live instruction (used in ret)\n  %result = add i32 %x, %y\n  ret i32 %result\n}\n`;
+      inputModeBadge.textContent = "Starter IR Template";
+      exampleDesc.textContent = "Inserted starter LLVM IR template. Notice %dead1 and %dead2 are unused.";
+    } else {
+      cCodeInput.value = `// Custom C code for Dead Code Elimination\nint custom_compute(int x, int y) {\n    // Unused computations:\n    int dead_calc = x * 10;\n    int unused_sum = dead_calc + 25;\n\n    // Used computation:\n    int live_result = x + y;\n    return live_result;\n}\n`;
+      inputModeBadge.textContent = "Starter C Template";
+      exampleDesc.textContent = "Inserted starter C code template. Notice dead_calc and unused_sum are unused.";
+    }
+    cCodeInput.focus();
+  });
+
+  // Input Mode Radio toggle (C code vs Direct LLVM IR)
+  inputModeRadios.forEach(r => {
+    r.addEventListener("change", () => {
+      const mode = document.querySelector('input[name="input-mode"]:checked').value;
+      if (mode === "ir") {
+        cCodeInput.placeholder = "Paste unoptimized LLVM IR here (define i32 @... { ... })...";
+        exampleSelect.disabled = true;
+        inputModeBadge.textContent = "Direct LLVM IR Mode";
+        exampleDesc.textContent = "Direct LLVM IR mode active. Paste your .ll text directly and click 'Optimize Input'.";
+      } else {
+        cCodeInput.placeholder = "Write or paste your custom C code here...";
+        exampleSelect.disabled = false;
+        inputModeBadge.textContent = "C Source Mode";
+        exampleDesc.textContent = "C source mode active. Clang will compile to IR and then run our DCE pass.";
+      }
+    });
+  });
+
+  // Tab navigation
+  tabButtons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      const targetId = btn.getAttribute("data-tab");
+      tabButtons.forEach(b => b.classList.remove("active"));
+      phasePanels.forEach(p => p.classList.remove("active"));
+      btn.classList.add("active");
+      const targetPanel = document.getElementById(targetId);
+      if (targetPanel) {
+        targetPanel.classList.add("active");
+      }
+    });
+  });
+
+  // Render IR panels with line numbers and highlighted removals
+  function renderIRPanels(beforeText, afterText, removedList) {
+    currentBeforeIR = beforeText;
+    currentAfterIR = afterText;
+
+    // Set of removed original line numbers
+    const removedLineSet = new Set();
+    if (removedList && Array.isArray(removedList)) {
+      removedList.forEach(r => removedLineSet.add(r.line_no));
+    }
+
+    // Render Before IR
+    irBeforeLines.innerHTML = "";
+    const bLines = beforeText.split("\n");
+    bLines.forEach((lineText, idx) => {
+      const lineNo = idx + 1;
+      const row = document.createElement("div");
+      row.className = "ir-line";
+      if (removedLineSet.has(lineNo)) {
+        row.classList.add("removed");
+      }
+
+      const numSpan = document.createElement("span");
+      numSpan.className = "ir-line-num";
+      numSpan.textContent = lineNo;
+
+      const textSpan = document.createElement("span");
+      textSpan.className = "ir-line-text";
+      textSpan.textContent = lineText;
+
+      row.appendChild(numSpan);
+      row.appendChild(textSpan);
+      irBeforeLines.appendChild(row);
+    });
+
+    // Render After IR
+    irAfterLines.innerHTML = "";
+    const aLines = afterText.split("\n");
+    aLines.forEach((lineText, idx) => {
+      const lineNo = idx + 1;
+      const row = document.createElement("div");
+      row.className = "ir-line";
+
+      const numSpan = document.createElement("span");
+      numSpan.className = "ir-line-num";
+      numSpan.textContent = lineNo;
+
+      const textSpan = document.createElement("span");
+      textSpan.className = "ir-line-text";
+      textSpan.textContent = lineText;
+
+      row.appendChild(numSpan);
+      row.appendChild(textSpan);
+      irAfterLines.appendChild(row);
+    });
+  }
+
+  // Render Removed and Rounds tables
+  function renderTables(removedList, roundsList) {
+    // Removed table
+    removedTbody.innerHTML = "";
+    if (!removedList || removedList.length === 0) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 6;
+      td.style.textAlign = "center";
+      td.style.color = "var(--muted)";
+      td.textContent = "No dead code found";
+      tr.appendChild(td);
+      removedTbody.appendChild(tr);
+    } else {
+      removedList.forEach(item => {
+        const tr = document.createElement("tr");
+
+        const tdFunc = document.createElement("td");
+        tdFunc.textContent = item.function;
+        tr.appendChild(tdFunc);
+
+        const tdBlock = document.createElement("td");
+        tdBlock.textContent = item.block || "entry";
+        tr.appendChild(tdBlock);
+
+        const tdLine = document.createElement("td");
+        tdLine.textContent = item.line_no;
+        tr.appendChild(tdLine);
+
+        const tdCode = document.createElement("td");
+        tdCode.className = "code-cell";
+        tdCode.textContent = item.text;
+        tr.appendChild(tdCode);
+
+        const tdReason = document.createElement("td");
+        tdReason.textContent = item.reason;
+        tr.appendChild(tdReason);
+
+        const tdRound = document.createElement("td");
+        tdRound.textContent = item.round;
+        tr.appendChild(tdRound);
+
+        removedTbody.appendChild(tr);
+      });
+    }
+
+    // Rounds table
+    roundsTbody.innerHTML = "";
+    if (roundsList && Array.isArray(roundsList)) {
+      roundsList.forEach(r => {
+        const tr = document.createElement("tr");
+
+        const tdRound = document.createElement("td");
+        tdRound.textContent = "Round " + r.round;
+        tr.appendChild(tdRound);
+
+        const tdRem = document.createElement("td");
+        if (r.removed === 0) {
+          tdRem.textContent = "0 removed (fixed-point reached, stopped)";
+          tdRem.style.color = "#059669";
+          tdRem.style.fontWeight = "600";
+        } else {
+          tdRem.textContent = r.removed + " instruction(s) removed";
+        }
+        tr.appendChild(tdRem);
+
+        roundsTbody.appendChild(tr);
+      });
+    }
+  }
+
+  // Copy buttons
+  btnCopyBefore.addEventListener("click", () => {
+    if (currentBeforeIR) {
+      navigator.clipboard.writeText(currentBeforeIR);
+      btnCopyBefore.textContent = "Copied!";
+      setTimeout(() => btnCopyBefore.textContent = "Copy", 1500);
+    }
+  });
+
+  btnCopyAfter.addEventListener("click", () => {
+    if (currentAfterIR) {
+      navigator.clipboard.writeText(currentAfterIR);
+      btnCopyAfter.textContent = "Copied!";
+      setTimeout(() => btnCopyAfter.textContent = "Copy", 1500);
+    }
+  });
+
+  // Download .ll
+  btnDownloadLL.addEventListener("click", () => {
+    if (!currentAfterIR) return;
+    const blob = new Blob([currentAfterIR], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "optimized.ll";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+  // Main Optimize Trigger
+  btnOptimize.addEventListener("click", async () => {
+    const inputMode = document.querySelector('input[name="input-mode"]:checked').value;
+    const code = cCodeInput.value.trim();
+    if (!code) {
+      showError("Validation Error", "Please provide input code to compile and optimize.", "");
+      return;
+    }
+
+    hideError();
+    btnOptimize.disabled = true;
+    btnOptimize.textContent = "Optimizing...";
+    setWorkflowStep(0);
+
+    try {
+      // 1. Run main optimize endpoint
+      setWorkflowStep(1);
+      const optRes = await fetch("/api/optimize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: code, input_type: inputMode })
+      });
+      const optData = await optRes.json();
+
+      if (!optData.ok) {
+        showError(optData.error || "Optimization Failed", optData.error || "", optData.details || "");
+        btnOptimize.disabled = false;
+        btnOptimize.textContent = "Optimize Input";
+        return;
+      }
+
+      setWorkflowStep(3);
+
+      // Populate Stats
+      const stats = optData.stats || {};
+      statBefore.textContent = stats.before !== undefined ? stats.before : 0;
+      statAfter.textContent = stats.after !== undefined ? stats.after : 0;
+      statRemoved.textContent = stats.removed !== undefined ? stats.removed : 0;
+      statPercent.textContent = (stats.percent !== undefined ? stats.percent : 0.0) + "%";
+
+      // Render IR Panels & Tables
+      renderIRPanels(optData.before_ir, optData.after_ir, optData.removed);
+      renderTables(optData.removed, optData.rounds);
+
+      // 2. Fetch all compiler phases in parallel
+      const phaseRes = await fetch("/api/phases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: code, input_type: inputMode })
+      });
+      const phaseData = await phaseRes.json();
+
+      if (phaseData.ok && phaseData.phases) {
+        const ph = phaseData.phases;
+        contentTokens.textContent = ph.tokens.content || "No tokens";
+        contentAst.textContent = ph.ast.content || "No AST";
+        contentIrBefore.textContent = ph.ir_before.content || "No IR before";
+        contentIrAfter.textContent = ph.ir_after.content || "No IR after";
+        contentAssembly.textContent = ph.assembly.content || "No assembly";
+      }
+
+      setWorkflowStep(5); // Complete all 5 steps
+
+    } catch (err) {
+      showError("Server Error", "Could not complete optimization request.", err.message);
+    } finally {
+      btnOptimize.disabled = false;
+      btnOptimize.textContent = "Optimize Input";
+    }
+  });
+
+  // Initialization
+  checkStatus();
+  loadExamples();
+</script>
+
+</body>
+</html>
+
